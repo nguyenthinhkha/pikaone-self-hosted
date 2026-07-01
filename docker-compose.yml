@@ -69,7 +69,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    command: sh -c "npx prisma migrate deploy && npm run start:prod"
+    command: sh -c "npx prisma migrate deploy && npm run seed:prod && npm run start:prod"
     networks:
       - pikaone
 

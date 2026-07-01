@@ -8,9 +8,25 @@ cd pikaone-self-hosted
 cp .env.example .env
 cp .env.db.example .env.db
 cp .env.api.example .env.api
-# Edit .env.db, .env.api — set JWT_SECRET, POSTGRES_PASSWORD, RESEND_*, OPENAI_API_KEY, WEB_BASE_URL
+# Edit .env.db, .env.api — set JWT_SECRET, POSTGRES_PASSWORD, SEED_ADMIN_*, RESEND_*, OPENAI_API_KEY, WEB_BASE_URL
 docker compose -p pikaone --env-file .env up -d
 ```
+
+## First boot
+
+On startup the API container runs database migrations, then seeds reference data (assets and currency units), then creates the first administrator when `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` are set in `.env.api`. Set both before the first `docker compose up`.
+
+- Assets are upserted on every API start (safe to re-run).
+- The administrator is created only once per email address.
+- Change the admin password after first login.
+
+For an existing deployment that was started without seed env vars:
+
+```bash
+docker compose -p pikaone exec app npm run seed:prod
+```
+
+Then restart the API container if it was already running.
 
 ## Prerequisites
 
@@ -80,6 +96,8 @@ Start the app stack first so the shared `pikaone` Docker network exists.
 | `REDIS_HOST` / `REDIS_PORT` | Overridden | Compose sets `redis:6379` |
 | `REDIS_PASSWORD` / `REDIS_DB` | No | Optional Redis auth/DB index |
 | `WEB_BASE_URL` | Yes | Public web URL for email links |
+| `SEED_ADMIN_EMAIL` | Yes* | First administrator email (*first boot) |
+| `SEED_ADMIN_PASSWORD` | Yes* | Initial admin password (*first boot; change after login) |
 | `OPENAI_API_KEY` | No | Required for OpenAI chat/vision |
 | `OPENAI_CHAT_MODEL` / `OPENAI_VISION_MODEL` | No | Model names |
 | `CHAT_LLM_PROVIDER` | No | `openai` or `ollama` |
