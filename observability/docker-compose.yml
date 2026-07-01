@@ -1,0 +1,131 @@
+# Observability stack — run separately after infra compose has created the `pikaone` network.
+#
+# Use a separate compose project so `up --remove-orphans` does not stop infra containers:
+#   docker compose -p pikaone -f hosts/pikahost/docker-compose.yml up -d
+#   docker compose -p pikaone-observability -f hosts/observability/docker-compose.yml up -d
+
+services:
+  loki:
+    image: grafana/loki:3.4.2
+    container_name: pikaone-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - ./loki-config.yml:/etc/loki/config.yml:ro
+      - loki_data:/loki
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - pikaone
+
+  promtail:
+    image: grafana/promtail:3.4.2
+    container_name: pikaone-promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      loki:
+        condition: service_healthy
+    networks:
+      - pikaone
+
+  tempo:
+    image: grafana/tempo:2.7.2
+    container_name: pikaone-tempo
+    restart: unless-stopped
+    command: -config.file=/etc/tempo/config.yml
+    volumes:
+      - ./tempo-config.yml:/etc/tempo/config.yml:ro
+      - tempo_data:/var/tempo
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3200/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - pikaone
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    container_name: pikaone-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-remote-write-receiver
+      - --storage.tsdb.path=/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - otel-collector
+    networks:
+      - pikaone
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.120.0
+    container_name: pikaone-otel-collector
+    restart: unless-stopped
+    command: --config=/etc/otel-collector/config.yml
+    ports:
+      - "4317:4317"
+    volumes:
+      - ./otel-collector-config.yml:/etc/otel-collector/config.yml:ro
+    depends_on:
+      tempo:
+        condition: service_healthy
+    networks:
+      - pikaone
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    container_name: pikaone-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      # Admin credentials apply only on first start (empty grafana_data volume).
+      # After that, users/passwords live in the volume — do not reset on redeploy.
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_PATHS_DATA=/var/lib/grafana
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - loki
+      - tempo
+      - prometheus
+    networks:
+      - pikaone
+
+networks:
+  pikaone:
+    external: true
+    name: pikaone
+
+volumes:
+  loki_data:
+    name: pikaone_loki_data
+    driver: local
+  tempo_data:
+    name: pikaone_tempo_data
+    driver: local
+  prometheus_data:
+    name: pikaone_prometheus_data
+    driver: local
+  grafana_data:
+    name: pikaone_grafana_data
+    driver: local

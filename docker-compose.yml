@@ -1,0 +1,104 @@
+services:
+  db:
+    image: postgres:18.3
+    restart: always
+    container_name: pikaone-db
+    ports:
+      - "5432:5432"
+    env_file:
+      - .env.db
+    volumes:
+      - pikaone_db_data:/var/lib/postgresql/data
+    environment:
+      - PGDATA=/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pika -d pikaonedb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - pikaone
+
+  redis:
+    image: redis:8.6.2
+    restart: always
+    container_name: pikaone-redis
+    ports:
+      - "4001:6379"
+    volumes:
+      - pikaone_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    command: redis-server --appendonly yes
+    networks:
+      - pikaone
+
+  app:
+    image: nguyenthinhkha/pikaone-api:${PIKAONE_IMAGE_TAG:-latest}
+    container_name: pikaone-api
+    ports:
+      - "4000:4000"
+    labels:
+      logging: pikaone
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    env_file:
+      - .env.api
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    volumes:
+      - pikaone_uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4000/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    command: sh -c "npx prisma migrate deploy && npm run start:prod"
+    networks:
+      - pikaone
+
+  web:
+    image: nguyenthinhkha/pikaone-web:${PIKAONE_IMAGE_TAG:-latest}
+    container_name: pikaone-web
+    ports:
+      - "3000:3000"
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - pikaone
+
+networks:
+  pikaone:
+    name: pikaone
+
+volumes:
+  pikaone_db_data:
+    driver: local
+  pikaone_redis_data:
+    driver: local
+  pikaone_uploads:
+    driver: local
