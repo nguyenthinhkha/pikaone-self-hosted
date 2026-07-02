@@ -8,7 +8,7 @@ cd pikaone-self-hosted
 cp .env.example .env
 cp .env.db.example .env.db
 cp .env.api.example .env.api
-# Edit .env.db, .env.api — set JWT_SECRET, POSTGRES_PASSWORD, SEED_ADMIN_*, RESEND_*, OPENAI_API_KEY, WEB_BASE_URL
+# Edit .env.db, .env.api — set JWT_SECRET, POSTGRES_PASSWORD, SEED_ADMIN_*, RESEND_*, OPENAI_API_KEY, WEB_BASE_URL, MASTER_KEY
 docker compose -p pikaone --env-file .env up -d
 ```
 
@@ -27,6 +27,41 @@ docker compose -p pikaone exec app npm run seed:prod
 ```
 
 Then restart the API container if it was already running.
+
+## Application-level encryption
+
+Sensitive fields (account names, balances, transaction amounts, notes, and similar) can be encrypted at rest with AES-256-GCM. Each user has a data-encryption key (DEK) wrapped by `MASTER_KEY`. The API decrypts data in memory before returning JSON to the web app.
+
+**Back up `MASTER_KEY` securely.** If it is lost, encrypted data cannot be recovered.
+
+### New deployment
+
+1. Generate a key: `openssl rand -base64 32`
+2. Add to `.env.api`:
+   - `MASTER_KEY=<generated value>`
+   - `ENCRYPTION_ENABLED=true` (optional; default `false` stores plaintext until you enable it)
+3. Start the stack. New users receive a DEK on registration; no data migration is needed on an empty database.
+
+### Enable encryption on an existing deployment
+
+Run these steps after upgrading to an image that includes the encryption migration (`20260702143547_add_encryption_layer`):
+
+1. Add `MASTER_KEY` to `.env.api` (generate with `openssl rand -base64 32`). Keep `ENCRYPTION_ENABLED=false` for now.
+2. Pull and restart so migrations apply:
+   ```bash
+   docker compose -p pikaone pull
+   docker compose -p pikaone --env-file .env up -d
+   ```
+3. Encrypt existing rows (requires `MASTER_KEY`; the script enables encryption for the run only):
+   ```bash
+   docker compose -p pikaone exec app node -r reflect-metadata dist/src/scripts/encrypt-existing-data.js
+   ```
+4. Set `ENCRYPTION_ENABLED=true` in `.env.api` and restart the API container:
+   ```bash
+   docker compose -p pikaone --env-file .env up -d app
+   ```
+
+Authenticated users can check rotation status and start DEK rotation via `GET/POST /api/users/me/encryption/*` (see Swagger).
 
 ## Prerequisites
 
@@ -103,6 +138,9 @@ Start the app stack first so the shared `pikaone` Docker network exists.
 | `CHAT_LLM_PROVIDER` | No | `openai` or `ollama` |
 | `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | No | When using Ollama |
 | `VNAPP_MOB_GOLD_API_KEY` | No | VN domestic gold prices |
+| `MASTER_KEY` | Yes* | Base64-encoded 32-byte key for field encryption (*required when `ENCRYPTION_ENABLED=true`; generate with `openssl rand -base64 32`) |
+| `ENCRYPTION_ENABLED` | No | `true` to encrypt sensitive fields at rest (default `false`) |
+| `ENCRYPTION_DEK_CACHE_TTL_SECONDS` | No | Redis TTL for per-user DEK cache (default `1800`) |
 | `LOG_LEVEL` / `LOG_PRETTY` | No | Use `LOG_PRETTY=false` for Loki JSON logs |
 | `OTEL_SERVICE_NAME` | No | Default `pikaone-api` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://otel-collector:4317` when observability is up |
