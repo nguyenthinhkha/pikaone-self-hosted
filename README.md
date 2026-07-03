@@ -137,7 +137,6 @@ Start the app stack first so the shared `pikaone` Docker network exists.
 | `OPENAI_CHAT_MODEL` / `OPENAI_VISION_MODEL` | No | Model names |
 | `CHAT_LLM_PROVIDER` | No | `openai` or `ollama` |
 | `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | No | When using Ollama |
-| `VNAPP_MOB_GOLD_API_KEY` | No | VN domestic gold prices |
 | `MASTER_KEY` | Yes* | Base64-encoded 32-byte key for field encryption (*required when `ENCRYPTION_ENABLED=true`; generate with `openssl rand -base64 32`) |
 | `ENCRYPTION_ENABLED` | No | `true` to encrypt sensitive fields at rest (default `false`) |
 | `ENCRYPTION_DEK_CACHE_TTL_SECONDS` | No | Redis TTL for per-user DEK cache (default `1800`) |
